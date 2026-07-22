@@ -31,12 +31,11 @@ A web-based ride-booking system specifically designed for UTMKL students in the 
    git clone [https://github.com/muhammadsyamilhaikal/utmklride.git](https://github.com/muhammadsyamilhaikal/utmklride.git)
 
    SQL SETUP
+   
    CREATE TABLE system_status (
     id INT PRIMARY KEY, 
-    status VARCHAR(10)
-);
-
-CREATE TABLE tempahan (
+    status VARCHAR(10));
+    CREATE TABLE tempahan (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nama VARCHAR(100),
     telefon VARCHAR(20),
@@ -45,5 +44,4 @@ CREATE TABLE tempahan (
     tarikh DATE,
     masa TIME,
     status VARCHAR(20) DEFAULT 'pending',
-    created_at DATETIME
-);
+    created_at DATETIME);
