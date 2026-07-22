@@ -2,10 +2,10 @@
 // 1. Set PHP timezone to Malaysia (Asia/Kuala_Lumpur)
 date_default_timezone_set('Asia/Kuala_Lumpur');
 
-$host = "sql306.infinityfree.com";
-$user = "if0_42164453";
-$pass = "rkKbbG05Q2";   
-$db   = "if0_42164453_ride_booking";
+$host = "your_db_host";
+$user = "your_db_user";
+$pass = "your_db_password";   
+$db   = "your_db_name";
 
 // Use try-catch for a cleaner and more reliable database connection
 try {
@@ -97,8 +97,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         if ($stmt->execute()) {
             // TELEGRAM NOTIFICATION SETUP
-            $botToken = "8601874885:AAGzZSB5Fs6HiRkcdDCDkxRBomApBNOAKcs";
-            $chatId   = "1359073968";
+            $botToken = "YOUR_TELEGRAM_BOT_TOKEN";
+            $chatId   = "YOUR_TELEGRAM_CHAT_ID";
 
             $date_formatted = date("d/m/Y", strtotime($date));
             $time_formatted = date("h:i A", strtotime($time));
