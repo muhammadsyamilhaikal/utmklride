@@ -1,0 +1,384 @@
+:root {
+    --primary: #1556e8;
+    --primary-dark: #0d3fb0;
+    --accent: #9d3df5;
+    --success: #16a34a;
+    --warning: #ca8a04;
+    --danger: #dc2626;
+    --bg: #f1f5f9;
+    --card-bg: #ffffff;
+}
+
+body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    margin: 0;
+    padding: 0;
+    padding-bottom: 80px;
+}
+
+.top-header {
+    position: sticky;
+    top: 0;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    color: white;
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 100;
+}
+
+.content {
+    padding: 16px;
+    max-width: 480px;
+    margin: auto;
+}
+
+.job-card {
+    background: var(--card-bg);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.booking-ref {
+    font-size: 13px;
+    color: var(--primary);
+    font-weight: 700;
+}
+
+.trip-route {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+}
+
+.btn-claim {
+    background: linear-gradient(135deg, #16a34a, #15803d);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 12px;
+    width: 100%;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 12px;
+}
+
+.btn-start {
+    background: linear-gradient(135deg, #1556e8, #9d3df5);
+}
+
+.btn-done {
+    background: linear-gradient(135deg, #16a34a, #15803d);
+}
+
+.btn-whatsapp {
+    background: #25d366;
+    color: white;
+}
+
+.btn-waze {
+    background: #33ccff;
+    color: #1e293b;
+}
+
+.btn-fare {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+}
+
+.btn-rearrange {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+}
+
+.btn-action-sm {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity 0.15s ease;
+}
+
+.btn-action-sm:active {
+    opacity: 0.8;
+}
+
+.action-btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+    margin-bottom: 12px;
+}
+
+.bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    display: flex;
+    justify-content: space-around;
+    border-top: 1px solid #e2e8f0;
+    z-index: 100;
+}
+
+.nav-item {
+    flex: 1;
+    padding: 10px 4px;
+    text-align: center;
+    cursor: pointer;
+    font-size: 11px;
+    color: #64748b;
+    position: relative;
+}
+
+.nav-item.active {
+    color: var(--primary);
+}
+
+.nav-icon {
+    font-size: 22px;
+    display: block;
+    margin-bottom: 2px;
+}
+
+.badge {
+    display: inline-block;
+    background: red;
+    color: white;
+    font-size: 10px;
+    border-radius: 10px;
+    padding: 2px 5px;
+    margin-left: 2px;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.toast {
+    position: fixed;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #333;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 20px;
+    font-size: 14px;
+    z-index: 999;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+}
+
+.toast.show {
+    opacity: 1;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #94a3b8;
+}
+
+.spinner {
+    border: 3px solid #e2e8f0;
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    animation: spin 0.8s linear infinite;
+    margin: 20px auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.install-banner {
+    background: linear-gradient(135deg, #1556e8, #9d3df5);
+    color: white;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 14px;
+}
+
+.status-confirmed { background: #dbeafe; color: #1e40af; }
+.status-in_progress { background: #fef3c7; color: #92400e; }
+.status-selesai { background: #dcfce7; color: #166534; }
+.status-batal { background: #fee2e2; color: #991b1b; }
+.status-pending { background: #f1f5f9; color: #475569; }
+
+/* Status Toggle Banner */
+.status-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    margin: 12px 16px;
+    border-radius: 12px;
+    color: white;
+    font-size: 14px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    transition: background-color 0.3s;
+}
+.status-banner.online {
+    background-color: var(--success);
+}
+.status-banner.offline {
+    background-color: #64748b;
+}
+
+/* Switch Toggle */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+}
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .4s;
+}
+input:checked + .slider {
+  background-color: #fff;
+}
+input:checked + .slider:before {
+  transform: translateX(20px);
+  background-color: var(--success);
+}
+.slider.round {
+  border-radius: 24px;
+}
+.slider.round:before {
+  border-radius: 50%;
+}
+
+/* Filter Pills */
+.filter-scroll {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.filter-scroll::-webkit-scrollbar {
+    display: none;
+}
+.filter-pill {
+    white-space: nowrap;
+    background: white;
+    border: 1px solid #cbd5e1;
+    color: #475569;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.filter-pill.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+/* =========================================================================
+   Responsive Breakpoints
+   Mobile-first — base styles above handle phones (< 768px).
+   ========================================================================= */
+
+/* Tablet (768px and up) */
+@media (min-width: 768px) {
+    .content {
+        max-width: 680px;
+        padding: 20px 24px;
+    }
+
+    .job-card {
+        padding: 20px;
+    }
+
+    .action-btn-row {
+        flex-wrap: nowrap;
+    }
+
+    .top-header {
+        padding: 14px 24px;
+    }
+
+    .status-banner {
+        margin: 12px 24px;
+    }
+}
+
+/* Desktop (1024px and up) — two-column job card grid */
+@media (min-width: 1024px) {
+    .content {
+        max-width: 1000px;
+        padding: 24px 32px;
+    }
+
+    #jobs-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        align-items: start;
+    }
+
+    #jobs-container .job-card {
+        margin-bottom: 0;
+    }
+
+    /* Keep mytrips single column — it has action buttons that need full width */
+    #mytrips-container {
+        max-width: 600px;
+    }
+}
+

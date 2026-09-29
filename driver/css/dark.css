@@ -1,0 +1,107 @@
+/* =========================================================================
+   dark.css — Dark Mode for UTMKL Ride Driver Dashboard
+   Applied only when <html data-theme="dark"> is set (driver pages only).
+   Overrides CSS custom properties defined in driver.css.
+   ========================================================================= */
+
+[data-theme="dark"] {
+    --bg:           #0f172a;
+    --card-bg:      #1e293b;
+    --primary:      #60a5fa;
+    --primary-dark: #3b82f6;
+    --accent:       #a78bfa;
+    --success:      #4ade80;
+    --warning:      #fbbf24;
+    --danger:       #f87171;
+}
+
+/* Base */
+[data-theme="dark"] body {
+    color: #e2e8f0;
+}
+
+/* Top header — deeper gradient */
+[data-theme="dark"] .top-header {
+    background: linear-gradient(135deg, #1e3a8a, #4c1d95);
+}
+
+/* Cards */
+[data-theme="dark"] .job-card {
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+    border: 1px solid #334155;
+}
+
+/* Bottom navigation */
+[data-theme="dark"] .bottom-nav {
+    background: #1e293b;
+    border-top-color: #334155;
+}
+
+[data-theme="dark"] .nav-item {
+    color: #94a3b8;
+}
+
+[data-theme="dark"] .nav-item.active {
+    color: var(--primary);
+}
+
+/* Filter pills */
+[data-theme="dark"] .filter-pill {
+    background:   #1e293b;
+    border-color: #475569;
+    color:        #94a3b8;
+}
+
+[data-theme="dark"] .filter-pill.active {
+    background:   var(--primary);
+    color:        #0f172a;
+    border-color: var(--primary);
+}
+
+/* Status banner text remains readable */
+[data-theme="dark"] .status-banner.online  { background-color: #166534; }
+[data-theme="dark"] .status-banner.offline { background-color: #334155; }
+
+/* Toast — darker background */
+[data-theme="dark"] .toast {
+    background: #0f172a;
+    border: 1px solid #334155;
+}
+
+/* Status badge overrides for dark mode readability */
+[data-theme="dark"] .status-confirmed   { background: #1e3a8a; color: #bfdbfe; }
+[data-theme="dark"] .status-in_progress { background: #78350f; color: #fde68a; }
+[data-theme="dark"] .status-selesai     { background: #14532d; color: #bbf7d0; }
+[data-theme="dark"] .status-batal       { background: #7f1d1d; color: #fecaca; }
+[data-theme="dark"] .status-pending     { background: #1e293b; color: #94a3b8; }
+
+/* Empty state */
+[data-theme="dark"] .empty-state {
+    color: #64748b;
+}
+
+/* Spinner color */
+[data-theme="dark"] .spinner {
+    border-color: #334155;
+    border-top-color: var(--primary);
+}
+
+/* Profile / change-password pages text inputs */
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-color: #475569;
+}
+
+/* Smooth theme transition */
+body,
+.top-header,
+.job-card,
+.bottom-nav,
+.filter-pill,
+.status-banner,
+.toast {
+    transition: background-color 0.25s ease, color 0.15s ease, border-color 0.15s ease;
+}

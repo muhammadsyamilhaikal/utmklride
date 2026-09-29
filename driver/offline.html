@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Offline - UTMKL Ride</title>
+    <meta name="theme-color" content="#1556e8">
+    <style>
+        body {
+            background: linear-gradient(135deg, #0d3fb0, #9d3df5);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            text-align: center;
+        }
+        .offline-card {
+            background: #ffffff;
+            color: #333;
+            border-radius: 20px;
+            padding: 40px 30px;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+        .icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+        }
+        h2 {
+            margin: 0 0 10px 0;
+            color: #1556e8;
+        }
+        p {
+            color: #666;
+            margin-bottom: 20px;
+        }
+        .btn-refresh {
+            background: linear-gradient(135deg, #1556e8, #9d3df5);
+            color: #fff;
+            border: none;
+            padding: 14px 24px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="offline-card">
+        <div class="icon">📡</div>
+        <h2>No Internet Connection</h2>
+        <p>You are currently offline. Please ensure your internet connection is active to view new bookings.</p>
+        <button class="btn-refresh" onclick="window.location.reload()">Try Again</button>
+    </div>
+</body>
+</html>
