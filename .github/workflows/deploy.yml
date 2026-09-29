@@ -20,8 +20,11 @@ jobs:
           server:    ${{ secrets.FTP_SERVER }}
           username:  ${{ secrets.FTP_USER }}
           password:  ${{ secrets.FTP_PASSWORD }}
+          protocol:  ftp
+          port:      21
           local-dir: ./
           server-dir: /htdocs/
+          log-level: verbose
           exclude: |
             **/.git*
             **/.git*/**
