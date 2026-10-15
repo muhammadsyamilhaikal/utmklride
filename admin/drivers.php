@@ -142,9 +142,6 @@ while ($row = $res->fetch_assoc()) {
 </head>
 <body style="background: #1a1a1a; font-family: sans-serif;">
 
-<?php
-$bot_token = get_setting($conn, 'telegram_bot_token');
-?>
 <div class="container">
     <a href="index.php" class="nav-link">&larr; Back to Dashboard</a>
     <h2>👨‍💼 Manage Drivers</h2>
@@ -313,23 +310,18 @@ $bot_token = get_setting($conn, 'telegram_bot_token');
 </div>
 
 <script>
-const BOT_TOKEN = <?= json_encode($bot_token); ?>;
+const CSRF_TOKEN = <?= json_encode($csrf_token); ?>;
 
 function pingDriverTg(chatId, driverName) {
-    if (!BOT_TOKEN) {
-        alert("Telegram Bot Token is not configured in Settings!");
-        return;
-    }
-    const text = encodeURIComponent(`🔔 *UTMKL Ride Test Notification*\nHello ${driverName}! Your Telegram notification is working perfectly.`);
-    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage?chat_id=${chatId}&text=${text}&parse_mode=Markdown`;
-
-    fetch(url, { mode: 'no-cors' })
-        .then(() => {
-            alert(`Test notification sent to ${driverName} (Chat ID: ${chatId})! Check their Telegram.`);
-        })
-        .catch(err => {
-            alert(`Error sending test ping: ${err}`);
-        });
+    const body = new URLSearchParams({
+        csrf_token: CSRF_TOKEN,
+        chat_id: chatId,
+        message: `🔔 *UTMKL Ride Test Notification*\nHello ${driverName}! Your Telegram notification is working perfectly.`
+    });
+    fetch('telegram_test.php', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body})
+        .then(response => response.json())
+        .then(data => alert(data.success ? `Test notification sent to ${driverName}.` : data.message))
+        .catch(() => alert('Error sending test ping.'));
 }
 </script>
 

@@ -2,13 +2,30 @@
 require_once 'auth_guard.php';
 require_once '../shared/config.php';
 
+if (empty($_SESSION['admin_csrf_token'])) {
+    $_SESSION['admin_csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrf_token = $_SESSION['admin_csrf_token'];
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $keys = ['telegram_bot_token', 'telegram_chat_id_admin', 'telegram_chat_id_drivers'];
+    if (!hash_equals($csrf_token, (string)($_POST['csrf_token'] ?? ''))) {
+        http_response_code(403);
+        exit('Invalid CSRF token');
+    }
+    $keys = ['telegram_chat_id_admin', 'telegram_chat_id_drivers'];
     $stmt = $conn->prepare("INSERT INTO settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = NOW()");
-    
+
     foreach ($keys as $key) {
         $val = trim(strip_tags($_POST[$key] ?? ''));
         $stmt->bind_param('ss', $key, $val);
+        $stmt->execute();
+    }
+
+    // Keep the bot token server-side and never render the stored secret into HTML.
+    $new_token = trim((string)($_POST['telegram_bot_token'] ?? ''));
+    if ($new_token !== '') {
+        $token_key = 'telegram_bot_token';
+        $stmt->bind_param('ss', $token_key, $new_token);
         $stmt->execute();
     }
     $stmt->close();
@@ -17,7 +34,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-$bot_token = get_setting($conn, 'telegram_bot_token');
 $chat_id_admin = get_setting($conn, 'telegram_chat_id_admin');
 $chat_id_drivers = get_setting($conn, 'telegram_chat_id_drivers');
 $driver_tg_list = [];
@@ -79,10 +95,11 @@ $driver_tg_count = count($driver_tg_list);
     <?php endif; ?>
 
     <form method="POST">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8') ?>">
         <div class="form-group">
             <label>Telegram Bot Token</label>
-            <input type="text" id="telegram_bot_token" name="telegram_bot_token" value="<?= htmlspecialchars($bot_token) ?>" required>
-            <small>Obtained from @BotFather when creating your bot (e.g. 8601874885:AAG...)</small>
+            <input type="password" id="telegram_bot_token" name="telegram_bot_token" value="" autocomplete="new-password" placeholder="Leave blank to keep the current token">
+            <small>Enter a new BotFather token only when rotating it. The stored token is never displayed.</small>
         </div>
         <div class="form-group">
             <label>Admin Chat ID</label>
@@ -120,7 +137,14 @@ $driver_tg_count = count($driver_tg_list);
 <div id="toast"></div>
 
 <script>
+const CSRF_TOKEN = <?= json_encode($csrf_token); ?>;
 const DRIVER_LIST = <?= json_encode($driver_tg_list); ?>;
+
+async function sendTelegramTest(chatId, message) {
+    const body = new URLSearchParams({csrf_token: CSRF_TOKEN, chat_id: chatId, message});
+    const response = await fetch('telegram_test.php', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body});
+    return response.json();
+}
 
 function showToast(message, isError = false) {
     const x = document.getElementById("toast");
@@ -132,41 +156,28 @@ function showToast(message, isError = false) {
 }
 
 function testAdminNotification() {
-    const token = document.getElementById('telegram_bot_token').value.trim();
     const chatId = document.getElementById('telegram_chat_id_admin').value.trim();
-    if (!token || !chatId) {
+    if (!chatId) {
         showToast("Please fill in both Bot Token and Admin Chat ID first.", true);
         return;
     }
-    const text = encodeURIComponent("🔔 *UTMKL Ride* — Test notification to Admin successful!");
-    const url = `https://api.telegram.org/bot${token}/sendMessage?chat_id=${chatId}&text=${text}&parse_mode=Markdown`;
-
-    fetch(url, { mode: 'no-cors' })
-        .then(() => showToast("Test ping sent to Admin (check Telegram)!"))
+    sendTelegramTest(chatId, "🔔 *UTMKL Ride* — Test notification to Admin successful!")
+        .then(data => showToast(data.message, !data.success))
         .catch(() => showToast("Failed to send test ping.", true));
 }
 
 function testGroupNotification() {
-    const token = document.getElementById('telegram_bot_token').value.trim();
     const groupId = document.getElementById('telegram_chat_id_drivers').value.trim();
-    if (!token || !groupId) {
+    if (!groupId) {
         showToast("Driver Group Chat ID is empty.", true);
         return;
     }
-    const text = encodeURIComponent("🚗 *UTMKL Ride* — Test notification to Driver Group successful!");
-    const url = `https://api.telegram.org/bot${token}/sendMessage?chat_id=${groupId}&text=${text}&parse_mode=Markdown`;
-
-    fetch(url, { mode: 'no-cors' })
-        .then(() => showToast("Test ping sent to Driver Group!"))
+    sendTelegramTest(groupId, "🚗 *UTMKL Ride* — Test notification to Driver Group successful!")
+        .then(data => showToast(data.message, !data.success))
         .catch(() => showToast("Failed to send to Driver Group.", true));
 }
 
 function testBroadcastAllDrivers() {
-    const token = document.getElementById('telegram_bot_token').value.trim();
-    if (!token) {
-        showToast("Please enter Bot Token first.", true);
-        return;
-    }
     if (!DRIVER_LIST || DRIVER_LIST.length === 0) {
         showToast("No active drivers with Telegram Chat ID registered yet.", true);
         return;
@@ -174,9 +185,7 @@ function testBroadcastAllDrivers() {
 
     let count = 0;
     DRIVER_LIST.forEach(d => {
-        const text = encodeURIComponent(`🔔 *UTMKL Ride Test Notification*\nHello ${d.name}! Your Telegram notification is working.`);
-        const url = `https://api.telegram.org/bot${token}/sendMessage?chat_id=${d.id}&text=${text}&parse_mode=Markdown`;
-        fetch(url, { mode: 'no-cors' }).catch(() => {});
+        sendTelegramTest(d.id, `🔔 *UTMKL Ride Test Notification*\nHello ${d.name}! Your Telegram notification is working.`).catch(() => {});
         count++;
     });
 

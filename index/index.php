@@ -1,7 +1,7 @@
 <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
+// ini_set('display_errors', 1);
+// ini_set('display_startup_errors', 1);
+// error_reporting(E_ALL);
 
 require_once 'config.php';
 
@@ -117,10 +117,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && $booking_open) {
             // =============================================================
             // Baca dari DB; fallback ke nilai asal jika belum migrate
             $botToken = $conn->query("SELECT value FROM settings WHERE key_name='telegram_bot_token' LIMIT 1");
-            $botToken = ($botToken && $r = $botToken->fetch_assoc()) ? $r['value'] : '8601874885:AAGzZSB5Fs6HiRkcdDCDkxRBomApBNOAKcs';
+            $botToken = ($botToken && $r = $botToken->fetch_assoc()) ? $r['value'] : null;
 
             $chatIdAdmin = $conn->query("SELECT value FROM settings WHERE key_name='telegram_chat_id_admin' LIMIT 1");
-            $chatIdAdmin = ($chatIdAdmin && $r = $chatIdAdmin->fetch_assoc()) ? $r['value'] : '1359073968';
+            $chatIdAdmin = ($chatIdAdmin && $r = $chatIdAdmin->fetch_assoc()) ? $r['value'] : null;
 
             $chatIdDrivers = $conn->query("SELECT value FROM settings WHERE key_name='telegram_chat_id_drivers' LIMIT 1");
             $chatIdDrivers = ($chatIdDrivers && $r = $chatIdDrivers->fetch_assoc()) ? $r['value'] : '';
@@ -136,8 +136,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && $booking_open) {
             $tg_msg .= "🌐 *IP Address:* " . $ip_address . "\n\n";
             $tg_msg .= "⚡ _Please check the Admin Panel now!_";
 
-            $url_tg = "https://api.telegram.org/bot" . $botToken . "/sendMessage?chat_id=" . $chatIdAdmin . "&text=" . urlencode($tg_msg) . "&parse_mode=Markdown";
-            $safe_url = json_encode($url_tg);
+            if ($botToken && $chatIdAdmin) {
+                send_telegram_message($botToken, $chatIdAdmin, $tg_msg);
+            }
 
             // Mesej ke Drivers (Group & Semua Driver Aktif)
             $tg_driver_msg  = "🚗 *NEW RIDE JOB AVAILABLE!* 🚗\n\n";
@@ -165,40 +166,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && $booking_open) {
                 }
             }
 
-            $driver_tg_urls = [];
-            foreach ($driver_recipients as $d_chat_id) {
-                $driver_tg_urls[] = "https://api.telegram.org/bot" . $botToken . "/sendMessage?chat_id=" . $d_chat_id . "&text=" . urlencode($tg_driver_msg) . "&parse_mode=Markdown";
-            }
-            $safe_driver_urls = json_encode($driver_tg_urls);
-
-            // =============================================================
-            // SERVER-SIDE PARALLEL BROADCAST (cURL Multi)
-            // Instant delivery on Localhost / VPS / cPanel
-            // =============================================================
-            if (function_exists('curl_multi_init')) {
-                $all_tg_broadcast_urls = array_merge([$url_tg], $driver_tg_urls);
-                if (!empty($all_tg_broadcast_urls)) {
-                    $mh = curl_multi_init();
-                    $curl_handles = [];
-                    foreach ($all_tg_broadcast_urls as $tg_url_item) {
-                        $ch = curl_init($tg_url_item);
-                        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                        curl_setopt($ch, CURLOPT_TIMEOUT, 2);
-                        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-                        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                        curl_multi_add_handle($mh, $ch);
-                        $curl_handles[] = $ch;
-                    }
-                    $running = null;
-                    do {
-                        curl_multi_exec($mh, $running);
-                        curl_multi_select($mh, 0.05);
-                    } while ($running > 0);
-                    foreach ($curl_handles as $ch) {
-                        curl_multi_remove_handle($mh, $ch);
-                        curl_close($ch);
-                    }
-                    curl_multi_close($mh);
+            if ($botToken) {
+                foreach ($driver_recipients as $d_chat_id) {
+                    send_telegram_message($botToken, $d_chat_id, $tg_driver_msg);
                 }
             }
 
@@ -259,19 +229,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && $booking_open) {
             // InfinityFree Telegram & Google Calendar bypass (via JS fetch fallback)
             $message .= "<script>
                 if (!localStorage.getItem('notified_{$booking_reference}')) {
-                    // 1. Notifikasi Telegram ke Admin
-                    const tgUrl = " . $safe_url . ";
-                    fetch(tgUrl, { mode: 'no-cors' }).catch(() => { new Image().src = tgUrl; });
-
-                    // 2. Notifikasi Telegram ke Semua Driver Aktif & Group
-                    const driverTgUrls = " . $safe_driver_urls . ";
-                    if (Array.isArray(driverTgUrls)) {
-                        driverTgUrls.forEach(url => {
-                            fetch(url, { mode: 'no-cors' }).catch(() => { new Image().src = url; });
-                        });
-                    }
-
-                    // 3. Hantar Data ke Webhook Google Calendar
+                    // Hantar data ke webhook Google Calendar
                     const gasUrl = " . $gas_safe_url . ";
                     const gasData = " . $gas_safe_data . ";
                     fetch(gasUrl, {
@@ -304,6 +262,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && $booking_open) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#146EF5">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="../driver/icons/icon-192.png">
     <title>UTMKL RIDE</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -629,6 +590,13 @@ if (driverNotice) {
 }
 </script>
 
+<script>
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js', { scope: './' })
+        .then(reg => console.log('Customer SW registered:', reg.scope))
+        .catch(err => console.error('Customer SW error:', err));
+}
+</script>
 </body>
 </html>
 

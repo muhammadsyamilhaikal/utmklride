@@ -3,6 +3,14 @@ require_once 'auth_guard.php';
 require_once '../shared/config.php';
 
 // =========================================================================
+// CSRF TOKEN — generated once per session, used to validate POST actions
+// =========================================================================
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrf_token = $_SESSION['csrf_token'];
+
+// =========================================================================
 // SERVICE STATUS: AVAILABLE / LIMITED / OFF
 // =========================================================================
 $conn->query("CREATE TABLE IF NOT EXISTS system_status (id INT PRIMARY KEY, status VARCHAR(10))");
@@ -24,14 +32,23 @@ if ($res_stat && $res_stat->num_rows > 0) {
     $current_status = 'AVAILABLE';
 }
 
-if (isset($_GET['set_service_status'])) {
-    $new_status = strtoupper(trim($_GET['set_service_status']));
+// =========================================================================
+// ACTION: CHANGE SERVICE STATUS (POST + CSRF protected)
+// =========================================================================
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['set_service_status'], $_POST['csrf_token']) &&
+    hash_equals($csrf_token, $_POST['csrf_token'])
+) {
+    $new_status = strtoupper(trim($_POST['set_service_status']));
 
     if (in_array($new_status, ['AVAILABLE', 'LIMITED', 'OFF'], true)) {
         $stmt_status = $conn->prepare("UPDATE system_status SET status = ? WHERE id = 1");
         $stmt_status->bind_param("s", $new_status);
         $stmt_status->execute();
         $stmt_status->close();
+        $current_status = $new_status;
+        log_admin_action($conn, 'service_status', null, "Service status changed to {$new_status}");
     }
 
     header("Location: " . strtok($_SERVER["REQUEST_URI"], '?'));
@@ -41,17 +58,79 @@ if (isset($_GET['set_service_status'])) {
 $message = "";
 $calendar_cancel_payload = null;
 $gas_webhook_url = "https://script.google.com/macros/s/AKfycbxV4WE6JgF31nCjwyy2Nh1Tda85EntbDSBeR8WNMZEUzZthpWBpb3E5xJI23BCVLy761A/exec";
-$bot_token = get_setting($conn, 'telegram_bot_token');
+
+// =========================================================================
+// ACTION: EDIT BOOKING DETAILS
+// =========================================================================
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['edit_booking_action'], $_POST['csrf_token']) &&
+    hash_equals($csrf_token, $_POST['csrf_token'])
+) {
+    $edit_id      = intval($_POST['edit_booking_id'] ?? 0);
+    $edit_pickup  = trim(strip_tags($_POST['edit_pickup']  ?? ''));
+    $edit_dropoff = trim(strip_tags($_POST['edit_dropoff'] ?? ''));
+    $edit_date    = $_POST['edit_date'] ?? '';
+    $edit_time    = $_POST['edit_time'] ?? '';
+
+    // Basic validation
+    $edit_ok = $edit_id > 0
+        && $edit_pickup  !== ''
+        && $edit_dropoff !== ''
+        && preg_match('/^\d{4}-\d{2}-\d{2}$/', $edit_date)
+        && preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $edit_time);
+
+    if ($edit_ok) {
+        $stmt_edit = $conn->prepare("
+            UPDATE tempahan
+            SET pickup = ?, dropoff = ?, tarikh = ?, masa = ?
+            WHERE id = ?
+        ");
+        $stmt_edit->bind_param('ssssi', $edit_pickup, $edit_dropoff, $edit_date, $edit_time, $edit_id);
+
+        if ($stmt_edit->execute()) {
+            $booking_ref = 'UTM-' . str_pad($edit_id, 4, '0', STR_PAD_LEFT);
+            $detail = "Edited: pickup='{$edit_pickup}', dropoff='{$edit_dropoff}', date={$edit_date}, time={$edit_time}";
+            log_admin_action($conn, 'edit', $booking_ref, $detail);
+            $message = "
+                <div class='alert alert-success'>
+                    <span class='alert-icon'>✓</span>
+                    <div><b>" . htmlspecialchars($booking_ref) . " updated.</b><br><small>Booking details have been saved successfully.</small></div>
+                </div>
+            ";
+        } else {
+            $message = "
+                <div class='alert alert-warning'>
+                    <span class='alert-icon'>!</span>
+                    <div><b>Update failed.</b><br><small>Could not save changes. Please try again.</small></div>
+                </div>
+            ";
+        }
+        $stmt_edit->close();
+    } else {
+        $message = "
+            <div class='alert alert-warning'>
+                <span class='alert-icon'>!</span>
+                <div><b>Invalid input.</b><br><small>Please fill in all fields correctly.</small></div>
+            </div>
+        ";
+    }
+}
 
 // =========================================================================
 // ACTION: UNASSIGN DRIVER FROM BOOKING
 // =========================================================================
-if (isset($_GET['unassign'])) {
-    $id_unassign = intval($_GET['unassign']);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['unassign'], $_POST['csrf_token']) &&
+    hash_equals($csrf_token, $_POST['csrf_token'])
+) {
+    $id_unassign = intval($_POST['unassign']);
     $stmt = $conn->prepare("UPDATE tempahan SET driver_id = NULL, status = 'pending', accepted_at = NULL WHERE id = ?");
     $stmt->bind_param("i", $id_unassign);
     if ($stmt->execute()) {
         $booking_ref = 'UTM-' . str_pad($id_unassign, 4, '0', STR_PAD_LEFT);
+        log_admin_action($conn, 'unassign', $booking_ref, 'Driver unassigned, returned to open pool');
         $message = "
             <div class='alert alert-success'>
                 <span class='alert-icon'>✓</span>
@@ -65,14 +144,28 @@ if (isset($_GET['unassign'])) {
 // =========================================================================
 // ACTION: FORCE ASSIGN DRIVER (SUPERADMIN DISPATCH)
 // =========================================================================
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['assign_driver_action'])) {
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['assign_driver_action'], $_POST['csrf_token']) &&
+    hash_equals($csrf_token, $_POST['csrf_token'])
+) {
     $b_id = intval($_POST['assign_booking_id'] ?? 0);
     $d_id = intval($_POST['assign_driver_id'] ?? 0);
     if ($b_id > 0 && $d_id > 0) {
-        $stmt = $conn->prepare("UPDATE tempahan SET driver_id = ?, status = 'confirmed', accepted_at = NOW() WHERE id = ?");
+        $driver_check = $conn->prepare("SELECT id FROM drivers WHERE id = ? AND status = 'active' LIMIT 1");
+        $driver_check->bind_param("i", $d_id);
+        $driver_check->execute();
+        $driver_valid = $driver_check->get_result()->num_rows === 1;
+        $driver_check->close();
+
+        if (!$driver_valid) {
+            $message = "<div class='alert alert-warning'><span class='alert-icon'>!</span><div><b>Assignment failed.</b><br><small>Selected driver is not active.</small></div></div>";
+        } else {
+        $stmt = $conn->prepare("UPDATE tempahan SET driver_id = ?, status = 'confirmed', accepted_at = NOW() WHERE id = ? AND (driver_id IS NULL OR driver_id = 0) AND status = 'pending'");
         $stmt->bind_param("ii", $d_id, $b_id);
         if ($stmt->execute()) {
             $booking_ref = 'UTM-' . str_pad($b_id, 4, '0', STR_PAD_LEFT);
+            log_admin_action($conn, 'assign', $booking_ref, "Manually assigned to driver ID {$d_id}");
             $message = "
                 <div class='alert alert-success'>
                     <span class='alert-icon'>✓</span>
@@ -81,6 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['assign_driver_action'
             ";
         }
         $stmt->close();
+        }
     }
 }
 
@@ -102,7 +196,11 @@ $notice_table_ready = $conn->query("
 if ($notice_table_ready) {
     $conn->query("INSERT IGNORE INTO driver_notice (id, is_active, message) VALUES (1, 0, '')");
 
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['notice_action'])) {
+    if (
+        $_SERVER['REQUEST_METHOD'] === 'POST' &&
+        isset($_POST['notice_action'], $_POST['csrf_token']) &&
+        hash_equals($csrf_token, (string) $_POST['csrf_token'])
+    ) {
         $notice_action = $_POST['notice_action'];
         $notice_status = 'error';
 
@@ -172,13 +270,18 @@ $notice_character_count = function_exists('mb_strlen') ? mb_strlen($notice_text,
 // =========================================================================
 // CONFIRM BOOKING
 // =========================================================================
-if (isset($_GET['confirm'])) {
-    $id_confirm = intval($_GET['confirm']);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['confirm'], $_POST['csrf_token']) &&
+    hash_equals($csrf_token, $_POST['csrf_token'])
+) {
+    $id_confirm = intval($_POST['confirm']);
     $stmt = $conn->prepare("UPDATE tempahan SET status = 'confirmed' WHERE id = ? AND (status = 'pending' OR status IS NULL OR status = '')");
     $stmt->bind_param("i", $id_confirm);
 
     if ($stmt->execute()) {
         $booking_ref = 'UTM-' . str_pad($id_confirm, 4, '0', STR_PAD_LEFT);
+        log_admin_action($conn, 'confirm', $booking_ref, 'Booking confirmed by admin');
         $message = "
             <div class='alert alert-success'>
                 <span class='alert-icon'>✓</span>
@@ -192,13 +295,18 @@ if (isset($_GET['confirm'])) {
 // =========================================================================
 // DONE
 // =========================================================================
-if (isset($_GET['selesai'])) {
-    $id_done = intval($_GET['selesai']);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['selesai'], $_POST['csrf_token']) &&
+    hash_equals($csrf_token, $_POST['csrf_token'])
+) {
+    $id_done = intval($_POST['selesai']);
     $stmt = $conn->prepare("UPDATE tempahan SET status = 'selesai', completed_at = NOW() WHERE id = ?");
     $stmt->bind_param("i", $id_done);
 
     if ($stmt->execute()) {
         $booking_ref = 'UTM-' . str_pad($id_done, 4, '0', STR_PAD_LEFT);
+        log_admin_action($conn, 'selesai', $booking_ref, 'Trip marked as completed by admin');
         $message = "
             <div class='alert alert-success'>
                 <span class='alert-icon'>✓</span>
@@ -212,8 +320,12 @@ if (isset($_GET['selesai'])) {
 // =========================================================================
 // CANCEL
 // =========================================================================
-if (isset($_GET['batal'])) {
-    $id_cancel = intval($_GET['batal']);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST' &&
+    isset($_POST['batal'], $_POST['csrf_token']) &&
+    hash_equals($csrf_token, $_POST['csrf_token'])
+) {
+    $id_cancel = intval($_POST['batal']);
 
     $lookup = $conn->prepare("SELECT id, nama, telefon, pickup, dropoff, tarikh, masa FROM tempahan WHERE id = ? LIMIT 1");
     $lookup->bind_param("i", $id_cancel);
@@ -228,6 +340,7 @@ if (isset($_GET['batal'])) {
 
         if ($stmt->execute()) {
             $booking_ref = 'UTM-' . str_pad($id_cancel, 4, '0', STR_PAD_LEFT);
+            log_admin_action($conn, 'cancel', $booking_ref, "Cancelled — Customer: {$booking_to_cancel['nama']}");
             $calendar_cancel_payload = [
                 'action'     => 'cancel',
                 'booking_id' => $booking_ref,
@@ -404,6 +517,10 @@ $claimed_count = $in_progress_count + $confirmed_count;
                 <span class="nav-icon">👨‍💼</span>
                 <span>Manage Drivers</span>
             </a>
+            <a href="reports.php" class="nav-item">
+                <span class="nav-icon">📊</span>
+                <span>Reports</span>
+            </a>
             <a href="settings.php" class="nav-item">
                 <span class="nav-icon">⚙️</span>
                 <span>Settings & Telegram</span>
@@ -436,21 +553,27 @@ $claimed_count = $in_progress_count + $confirmed_count;
             </div>
 
             <div class="service-buttons">
-                <a href="?set_service_status=AVAILABLE"
-                   class="service-btn available <?= $current_status === 'AVAILABLE' ? 'active' : ''; ?>"
-                   onclick="return confirm('Set service to AVAILABLE and open customer bookings?');">
-                    <span>●</span> Available
-                </a>
-                <a href="?set_service_status=LIMITED"
-                   class="service-btn limited <?= $current_status === 'LIMITED' ? 'active' : ''; ?>"
-                   onclick="return confirm('Set service to LIMITED availability?');">
-                    <span>●</span> Limited
-                </a>
-                <a href="?set_service_status=OFF"
-                   class="service-btn off <?= $current_status === 'OFF' ? 'active' : ''; ?>"
-                   onclick="return confirm('Set service to OFF DUTY and close new bookings?');">
-                    <span>●</span> Off Duty
-                </a>
+                <form method="POST" style="display:contents;" onsubmit="return confirm('Set service to AVAILABLE and open customer bookings?');">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token); ?>">
+                    <button type="submit" name="set_service_status" value="AVAILABLE"
+                        class="service-btn available <?= $current_status === 'AVAILABLE' ? 'active' : ''; ?>">
+                        <span>●</span> Available
+                    </button>
+                </form>
+                <form method="POST" style="display:contents;" onsubmit="return confirm('Set service to LIMITED availability?');">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token); ?>">
+                    <button type="submit" name="set_service_status" value="LIMITED"
+                        class="service-btn limited <?= $current_status === 'LIMITED' ? 'active' : ''; ?>">
+                        <span>●</span> Limited
+                    </button>
+                </form>
+                <form method="POST" style="display:contents;" onsubmit="return confirm('Set service to OFF DUTY and close new bookings?');">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token); ?>">
+                    <button type="submit" name="set_service_status" value="OFF"
+                        class="service-btn off <?= $current_status === 'OFF' ? 'active' : ''; ?>">
+                        <span>●</span> Off Duty
+                    </button>
+                </form>
             </div>
         </div>
 
@@ -845,15 +968,16 @@ $claimed_count = $in_progress_count + $confirmed_count;
                                             </div>
                                         <?php endif; ?>
                                         <div>
-                                            <a href="?unassign=<?= intval($row['id']); ?>"
-                                               class="btn-unassign-tiny"
-                                               onclick="return confirm('Remove driver from <?= htmlspecialchars($booking_reference); ?> and return to open job pool?');">
-                                                ↺ Unassign Driver
-                                            </a>
+                                                                            <form method="POST" style="display:inline;" onsubmit="return confirm('Remove driver from <?= htmlspecialchars($booking_reference); ?> and return to open job pool?');">
+                                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token); ?>">
+                                                <input type="hidden" name="unassign" value="<?= intval($row['id']); ?>">
+                                                <button type="submit" class="btn-unassign-tiny">↺ Unassign Driver</button>
+                                            </form>
                                         </div>
                                     <?php else: ?>
                                         <span class="driver-unassigned-badge">⚠️ Unclaimed</span>
                                         <form method="POST" style="margin-top:4px;display:flex;gap:4px;align-items:center;">
+                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token); ?>">
                                             <input type="hidden" name="assign_driver_action" value="1">
                                             <input type="hidden" name="assign_booking_id" value="<?= intval($row['id']); ?>">
                                             <select name="assign_driver_id" class="assign-select-inline" required>
@@ -876,11 +1000,11 @@ $claimed_count = $in_progress_count + $confirmed_count;
                                 <td data-label="Actions">
                                     <div class="action-grid">
                                         <?php if ($booking_status !== 'confirmed' && $booking_status !== 'in_progress'): ?>
-                                            <a href="?confirm=<?= intval($row['id']); ?>"
-                                               class="action-btn primary"
-                                               onclick="return confirm('Confirm <?= htmlspecialchars($booking_reference, ENT_QUOTES, 'UTF-8'); ?>? Customer will then be able to download the official PDF receipt.');">
-                                                ✓ Confirm
-                                            </a>
+                                            <form method="POST" style="display:inline;" onsubmit="return confirm('Confirm <?= htmlspecialchars($booking_reference, ENT_QUOTES, 'UTF-8'); ?>? Customer will then be able to download the official PDF receipt.');">
+                                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token); ?>">
+                                                <input type="hidden" name="confirm" value="<?= intval($row['id']); ?>">
+                                                <button type="submit" class="action-btn primary">✓ Confirm</button>
+                                            </form>
                                         <?php else: ?>
                                             <span class="action-btn confirmed-static">✓ Confirmed</span>
                                         <?php endif; ?>
@@ -892,17 +1016,31 @@ $claimed_count = $in_progress_count + $confirmed_count;
                                             ↻ Rearrange
                                         </a>
 
-                                        <a href="?selesai=<?= intval($row['id']); ?>"
-                                           class="action-btn success"
-                                           onclick="return confirm('Mark <?= htmlspecialchars($booking_reference, ENT_QUOTES, 'UTF-8'); ?> as completed?');">
-                                            ✓ Done
-                                        </a>
+                                        <button type="button"
+                                            class="action-btn"
+                                            style="background:#f0f4ff;color:#1d4ed8;border:1px solid #bfdbfe;cursor:pointer;font:inherit;font-size:10px;font-weight:600;border-radius:8px;padding:5px 8px;"
+                                            onclick="openEditModal(
+                                                <?= intval($row['id']); ?>,
+                                                '<?= htmlspecialchars($booking_reference, ENT_QUOTES); ?>',
+                                                '<?= htmlspecialchars($row['pickup'],  ENT_QUOTES); ?>',
+                                                '<?= htmlspecialchars($row['dropoff'], ENT_QUOTES); ?>',
+                                                '<?= htmlspecialchars($row['tarikh'],  ENT_QUOTES); ?>',
+                                                '<?= htmlspecialchars(substr($row['masa'], 0, 5), ENT_QUOTES); ?>'
+                                            )">
+                                            ✏ Edit
+                                        </button>
 
-                                        <a href="?batal=<?= intval($row['id']); ?>"
-                                           class="action-btn danger"
-                                           onclick="return confirm('Cancel <?= htmlspecialchars($booking_reference, ENT_QUOTES, 'UTF-8'); ?>? A delete request will also be sent to Google Calendar.');">
-                                            × Cancel
-                                        </a>
+                                        <form method="POST" style="display:inline;" onsubmit="return confirm('Mark <?= htmlspecialchars($booking_reference, ENT_QUOTES, 'UTF-8'); ?> as completed?');">
+                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token); ?>">
+                                            <input type="hidden" name="selesai" value="<?= intval($row['id']); ?>">
+                                            <button type="submit" class="action-btn success">✓ Done</button>
+                                        </form>
+
+                                        <form method="POST" style="display:inline;" onsubmit="return confirm('Cancel <?= htmlspecialchars($booking_reference, ENT_QUOTES, 'UTF-8'); ?>? A delete request will also be sent to Google Calendar.');">
+                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token); ?>">
+                                            <input type="hidden" name="batal" value="<?= intval($row['id']); ?>">
+                                            <button type="submit" class="action-btn danger">× Cancel</button>
+                                        </form>
                                     </div>
                                 </td>
                             </tr>
@@ -932,10 +1070,111 @@ $claimed_count = $in_progress_count + $confirmed_count;
 
 <div class="toast-container" id="toastContainer"></div>
 
+<!-- ===== EDIT BOOKING MODAL ===== -->
+<div id="editModal" role="dialog" aria-modal="true" aria-labelledby="editModalTitle"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9000;align-items:center;justify-content:center;padding:16px;">
+    <div style="background:#fff;border-radius:20px;padding:30px 26px;width:100%;max-width:480px;box-shadow:0 20px 60px rgba(0,0,0,0.25);position:relative;max-height:90vh;overflow-y:auto;">
+
+        <button onclick="closeEditModal()" aria-label="Close"
+                style="position:absolute;top:14px;right:16px;width:34px;height:34px;border:0;border-radius:50%;background:#f1f5f9;color:#64748b;font-size:18px;cursor:pointer;line-height:1;">×</button>
+
+        <div style="margin-bottom:22px;">
+            <p style="font-size:10px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">EDIT BOOKING</p>
+            <h2 id="editModalTitle" style="font-size:18px;color:#101828;margin:0;">Edit Booking Details</h2>
+            <p id="editModalRef" style="font-size:12px;color:#667085;margin-top:3px;"></p>
+        </div>
+
+        <form method="POST" id="editBookingForm">
+            <input type="hidden" name="csrf_token"        value="<?= htmlspecialchars($csrf_token); ?>">
+            <input type="hidden" name="edit_booking_action" value="1">
+            <input type="hidden" name="edit_booking_id"  id="editBookingId">
+
+            <div style="margin-bottom:14px;">
+                <label style="display:block;font-size:11px;font-weight:600;color:#344054;margin-bottom:6px;">📍 Pick-up Location</label>
+                <input id="editPickup" name="edit_pickup" type="text" required
+                       style="width:100%;padding:11px 13px;border:1px solid #d0d5dd;border-radius:10px;font:inherit;font-size:13px;color:#101828;outline:none;"
+                       onfocus="this.style.borderColor='#93c5fd'" onblur="this.style.borderColor='#d0d5dd'">
+            </div>
+
+            <div style="margin-bottom:14px;">
+                <label style="display:block;font-size:11px;font-weight:600;color:#344054;margin-bottom:6px;">🏁 Drop-off Location</label>
+                <input id="editDropoff" name="edit_dropoff" type="text" required
+                       style="width:100%;padding:11px 13px;border:1px solid #d0d5dd;border-radius:10px;font:inherit;font-size:13px;color:#101828;outline:none;"
+                       onfocus="this.style.borderColor='#93c5fd'" onblur="this.style.borderColor='#d0d5dd'">
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px;">
+                <div>
+                    <label style="display:block;font-size:11px;font-weight:600;color:#344054;margin-bottom:6px;">📅 Date</label>
+                    <input id="editDate" name="edit_date" type="date" required
+                           style="width:100%;padding:11px 13px;border:1px solid #d0d5dd;border-radius:10px;font:inherit;font-size:13px;color:#101828;outline:none;"
+                           onfocus="this.style.borderColor='#93c5fd'" onblur="this.style.borderColor='#d0d5dd'">
+                </div>
+                <div>
+                    <label style="display:block;font-size:11px;font-weight:600;color:#344054;margin-bottom:6px;">🕒 Time</label>
+                    <input id="editTime" name="edit_time" type="time" required
+                           style="width:100%;padding:11px 13px;border:1px solid #d0d5dd;border-radius:10px;font:inherit;font-size:13px;color:#101828;outline:none;"
+                           onfocus="this.style.borderColor='#93c5fd'" onblur="this.style.borderColor='#d0d5dd'">
+                </div>
+            </div>
+
+            <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:11px 13px;margin-bottom:20px;font-size:11px;color:#92400e;line-height:1.55;">
+                ⚠️ <strong>Note:</strong> Editing will update the booking in the system. The customer and driver are <strong>not automatically notified</strong> — please inform them manually via WhatsApp if needed.
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <button type="button" onclick="closeEditModal()"
+                        style="padding:13px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;color:#64748b;font:inherit;font-size:13px;font-weight:600;cursor:pointer;">
+                    Cancel
+                </button>
+                <button type="submit"
+                        style="padding:13px;border:0;border-radius:12px;background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;font:inherit;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(37,99,235,0.25);">
+                    ✏ Save Changes
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+<!-- ===== END EDIT MODAL ===== -->
+
+
 <script>
 let latestBookingId = <?= $current_latest_id; ?>;
-const BOT_TOKEN = <?= json_encode($bot_token); ?>;
+const CSRF_TOKEN = <?= json_encode($_SESSION['csrf_token']); ?>;
 let currentTab = 'all';
+
+// ── Edit Modal ──────────────────────────────────────────────────────────
+function openEditModal(id, ref, pickup, dropoff, date, time) {
+    document.getElementById('editBookingId').value  = id;
+    document.getElementById('editModalRef').textContent = 'Booking: ' + ref;
+    document.getElementById('editPickup').value     = pickup;
+    document.getElementById('editDropoff').value    = dropoff;
+    document.getElementById('editDate').value       = date;
+    document.getElementById('editTime').value       = time;
+
+    const modal = document.getElementById('editModal');
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    // Focus first input for keyboard users
+    setTimeout(() => document.getElementById('editPickup').focus(), 80);
+}
+
+function closeEditModal() {
+    document.getElementById('editModal').style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+// Close on backdrop click
+document.getElementById('editModal').addEventListener('click', function(e) {
+    if (e.target === this) closeEditModal();
+});
+
+// Close on Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('editModal').style.display === 'flex') {
+        closeEditModal();
+    }
+});
 
 function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
@@ -981,16 +1220,15 @@ function cleanPhoneMY(phone) {
 }
 
 function pingDriverTg(chatId, driverName) {
-    if (!BOT_TOKEN) {
-        alert("Telegram Bot Token is not configured in Settings!");
-        return;
-    }
-    const text = encodeURIComponent(`🔔 *UTMKL Ride Notification*\nHello ${driverName}! Superadmin test ping successful.`);
-    const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage?chat_id=${chatId}&text=${text}&parse_mode=Markdown`;
-
-    fetch(url, { mode: 'no-cors' })
-        .then(() => alert(`Ping sent to ${driverName} (Chat ID: ${chatId}) via Telegram!`))
-        .catch(err => alert(`Error sending ping: ${err}`));
+    const body = new URLSearchParams({
+        csrf_token: CSRF_TOKEN,
+        chat_id: chatId,
+        message: `🔔 *UTMKL Ride Notification*\nHello ${driverName}! Superadmin test ping successful.`
+    });
+    fetch('telegram_test.php', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body})
+        .then(response => response.json())
+        .then(data => alert(data.success ? `Ping sent to ${driverName}.` : data.message))
+        .catch(() => alert('Error sending ping.'));
 }
 
 function sendPriceWSFromButton(button) {

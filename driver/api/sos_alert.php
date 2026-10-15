@@ -47,38 +47,9 @@ $message .= "⚠️ *Issue:* " . htmlspecialchars($issue_type) . "\n";
 $message .= "🎫 *Booking Ref:* " . htmlspecialchars($booking_ref) . "\n\n";
 $message .= "Please contact the driver or manage the passenger immediately!";
 
-// Send Telegram message
-$telegram_url = "https://api.telegram.org/bot{$bot_token}/sendMessage";
-$post_fields = [
-    'chat_id' => $admin_chat_id,
-    'text' => $message,
-    'parse_mode' => 'Markdown'
-];
-
-$ch = curl_init();
-curl_setopt($ch, CURLOPT_URL, $telegram_url);
-curl_setopt($ch, CURLOPT_POST, true);
-curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post_fields));
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_TIMEOUT, 5); // 5 seconds timeout
-curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Prevent local SSL cert issues
-
-$response = curl_exec($ch);
-$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$curl_error = curl_error($ch);
-curl_close($ch);
-
-if ($response === false) {
-    echo json_encode(['success' => false, 'message' => 'cURL Error: ' . $curl_error]);
-} elseif ($http_code === 200) {
-    echo json_encode(['success' => true, 'message' => 'SOS Alert sent successfully to the admin.']);
-} else {
-    // Optionally log the exact response for debugging
-    error_log("Telegram SOS Error HTTP {$http_code}: " . $response);
-    
-    // Parse Telegram error if possible
-    $tg_err = json_decode($response, true);
-    $tg_msg = isset($tg_err['description']) ? $tg_err['description'] : 'Unknown Telegram error';
-    
-    echo json_encode(['success' => false, 'message' => "Telegram API Error ({$http_code}): " . $tg_msg]);
-}
+// Send Telegram server-side; the bot token never reaches the browser.
+$success = send_telegram_message($bot_token, $admin_chat_id, $message);
+echo json_encode([
+    'success' => $success,
+    'message' => $success ? 'SOS Alert sent successfully to the admin.' : 'Unable to send SOS alert.'
+]);

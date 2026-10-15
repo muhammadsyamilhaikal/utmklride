@@ -8,11 +8,8 @@ $stmt->bind_param("i", $driver_id);
 $stmt->execute();
 $driver = $stmt->get_result()->fetch_assoc();
 
-// Trip History
-$hist_stmt = $conn->prepare("SELECT * FROM tempahan WHERE driver_id = ? AND status IN ('selesai', 'batal') ORDER BY completed_at DESC LIMIT 50");
-$hist_stmt->bind_param("i", $driver_id);
-$hist_stmt->execute();
-$history = $hist_stmt->get_result();
+
+// Trip History is now loaded dynamically via api/history.php (see loadHistory() in JS)
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -37,17 +34,23 @@ $history = $hist_stmt->get_result();
 
 <body>
     <div class="top-header">
-        <div>
-            <strong><?php echo htmlspecialchars($driver['nama']); ?></strong>
-            <div style="font-size:12px; opacity:0.8;"><?php echo htmlspecialchars($driver['no_plat'] ?? '—'); ?></div>
+        <div class="driver-profile-info">
+            <div class="driver-avatar">
+                <?php if (!empty($driver['profile_photo']) && file_exists(__DIR__ . '/' . $driver['profile_photo'])): ?>
+                    <img src="<?php echo htmlspecialchars($driver['profile_photo']); ?>" alt="Profile" style="width:100%; height:100%; object-fit:cover; border-radius:50%;">
+                <?php else: ?>
+                    👨‍✈️
+                <?php endif; ?>
+            </div>
+            <div class="driver-text">
+                <div class="driver-name"><?php echo htmlspecialchars($driver['nama']); ?></div>
+                <div class="driver-plate"><?php echo htmlspecialchars($driver['no_plat'] ?? '—'); ?></div>
+            </div>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;">
-            <button id="themeToggle" onclick="toggleTheme()" aria-label="Toggle dark mode"
-                style="background:rgba(255,255,255,0.2); border:none; color:white;
-                       padding:6px 12px; border-radius:8px; cursor:pointer;
-                       font-size:14px; font-family:inherit;">🌙</button>
-            <a href="profile.php" style="color:white; text-decoration:none; font-size:14px; background:rgba(255,255,255,0.2); padding:6px 12px; border-radius:8px;">👤 Profile</a>
-            <a href="logout.php" style="color:white; text-decoration:none; font-size:14px; background:rgba(255,255,255,0.2); padding:6px 12px; border-radius:8px;">Logout</a>
+        <div class="header-actions">
+            <button id="themeToggle" onclick="toggleTheme()" class="header-icon" aria-label="Toggle dark mode">🌙</button>
+            <a href="profile.php" class="header-icon">⚙️</a>
+            <a href="logout.php" class="header-icon">🔔</a>
         </div>
     </div>
 
@@ -67,6 +70,11 @@ $history = $hist_stmt->get_result();
     <div class="install-banner" id="installBanner" style="display:none;">
         <span>📲 Install this app!</span>
         <button id="installBtn" style="background:white; color:#1556e8; border:none; padding:6px 12px; border-radius:6px; font-weight:bold; cursor:pointer;">Install</button>
+    </div>
+
+    <div class="update-banner" id="updateBanner" role="status" aria-live="polite" hidden>
+        <span>✨ New version available</span>
+        <button id="reloadUpdateBtn" type="button">Reload</button>
     </div>
 
     <div class="content">
@@ -94,31 +102,9 @@ $history = $hist_stmt->get_result();
             </div>
         </div>
 
-        <!-- Tab 3: History -->
+        <!-- Tab 3: History — loaded dynamically via api/history.php -->
         <div id="tab-history" class="tab-content">
-            <?php if ($history->num_rows > 0): ?>
-                <?php while($row = $history->fetch_assoc()): ?>
-                    <div class="job-card">
-                        <div style="display:flex; justify-content:space-between;">
-                            <span class="booking-ref">UTM-<?php echo str_pad($row['id'], 4, '0', STR_PAD_LEFT); ?></span>
-                            <span class="badge status-<?php echo $row['status']; ?>">
-                                <?php echo $row['status'] === 'selesai' ? 'Completed' : 'Cancelled'; ?>
-                            </span>
-                        </div>
-                        <div style="margin-top:8px; font-size:13px; color:#64748b;">
-                            <?php echo date('d M Y, h:i A', strtotime($row['tarikh'] . ' ' . $row['masa'])); ?>
-                        </div>
-                        <div class="trip-route" style="margin-top:8px;">
-                            📍 <?php echo htmlspecialchars($row['pickup']); ?> &rarr; <?php echo htmlspecialchars($row['dropoff']); ?>
-                        </div>
-                    </div>
-                <?php endwhile; ?>
-            <?php else: ?>
-                <div class="empty-state">
-                    <div style="font-size:40px; margin-bottom:10px;">📋</div>
-                    <div>No trip history found.</div>
-                </div>
-            <?php endif; ?>
+            <div class="spinner"></div>
         </div>
     </div>
 
@@ -240,6 +226,7 @@ $history = $hist_stmt->get_result();
             el.classList.add('active');
             if (tabId === 'jobs') loadJobs();
             if (tabId === 'mytrips') loadMyTrips();
+            if (tabId === 'history') loadHistory();
         }
 
         function showToast(message) {
@@ -334,18 +321,28 @@ $history = $hist_stmt->get_result();
                 filteredJobs.forEach(job => {
                     html += `
                         <div class="job-card">
-                            <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                                <span class="booking-ref">${job.booking_ref}</span>
-                                <span style="font-size:12px; color:#64748b;">${job.created_ago}</span>
+                            <div class="card-ref">Booking Reference: ${escapeHTML(job.booking_ref)}</div>
+                            <div class="card-customer">${escapeHTML(job.nama)}</div>
+                            
+                            <div class="route-grid">
+                                <div class="route-point">
+                                    <span class="route-label">Pickup</span>
+                                    <span class="route-value">${escapeHTML(job.pickup)}</span>
+                                </div>
+                                <div class="route-arrow">➔</div>
+                                <div class="route-point">
+                                    <span class="route-label">Dropoff</span>
+                                    <span class="route-value">${escapeHTML(job.dropoff)}</span>
+                                </div>
                             </div>
-                            <div style="font-weight:bold; margin-bottom:5px;">${job.nama}</div>
-                            <div class="trip-route" style="margin-bottom:8px;">
-                                📍 ${job.pickup} &rarr; ${job.dropoff}
+                            
+                            <div class="card-footer">
+                                <div class="card-datetime">
+                                    <span>Date: ${escapeHTML(job.tarikh_format)}</span>
+                                    <span>Time: ${escapeHTML(job.masa_format)}</span>
+                                </div>
+                                <button class="btn-claim" onclick="claimJob(${job.id})">🤝 Claim This Trip</button>
                             </div>
-                            <div style="font-size:13px; color:#64748b; margin-bottom:10px;">
-                                📅 ${job.tarikh_format} &nbsp;🕒 ${job.masa_format}
-                            </div>
-                            <button class="btn-claim" onclick="claimJob(${job.id})">🤝 Claim This Trip</button>
                         </div>
                     `;
                 });
@@ -454,19 +451,31 @@ $history = $hist_stmt->get_result();
 
                         html += `
                             <div class="job-card">
-                                <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                                    <span class="booking-ref">${escapeHTML(trip.booking_ref)}</span>
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                                    <div class="card-ref" style="margin:0;">Booking Reference: ${escapeHTML(trip.booking_ref)}</div>
                                     <span class="badge status-${trip.status}">${statusLabel}</span>
                                 </div>
-                                <div style="font-weight:bold; font-size:15px; color:#1e293b;">${escapeHTML(trip.nama)}</div>
-                                <div style="margin-bottom:8px;">
+                                <div class="card-customer" style="margin-bottom:8px;">${escapeHTML(trip.nama)}</div>
+                                
+                                <div style="margin-bottom:16px;">
                                     <a href="tel:${cleanPhone}" style="text-decoration:none; color:var(--primary); font-size:14px; font-weight:600;">📞 ${escapeHTML(trip.telefon)}</a>
                                 </div>
-                                <div class="trip-route" style="margin-bottom:8px;">
-                                    📍 ${escapeHTML(trip.pickup)} &rarr; ${escapeHTML(trip.dropoff)}
+                                
+                                <div class="route-grid">
+                                    <div class="route-point">
+                                        <span class="route-label">Pickup</span>
+                                        <span class="route-value">${escapeHTML(trip.pickup)}</span>
+                                    </div>
+                                    <div class="route-arrow">➔</div>
+                                    <div class="route-point">
+                                        <span class="route-label">Dropoff</span>
+                                        <span class="route-value">${escapeHTML(trip.dropoff)}</span>
+                                    </div>
                                 </div>
-                                <div style="font-size:13px; color:#64748b; margin-bottom:10px;">
-                                    📅 ${escapeHTML(trip.tarikh_format)} &nbsp;🕒 ${escapeHTML(trip.masa_format)}
+                                
+                                <div class="card-datetime" style="margin-bottom:16px;">
+                                    <span>Date: ${escapeHTML(trip.tarikh_format)}</span>
+                                    <span>Time: ${escapeHTML(trip.masa_format)}</span>
                                 </div>
                                 <div class="action-btn-row">
                                     <button type="button" class="btn-action-sm btn-fare"
@@ -521,6 +530,77 @@ $history = $hist_stmt->get_result();
                         </div>
                     `;
                 }
+        }
+
+
+        // ===== History Tab (dynamic) =====
+
+        async function loadHistory() {
+            const container = document.getElementById('tab-history');
+            container.innerHTML = '<div class="spinner"></div>';
+            try {
+                const res = await fetch('api/history.php', {headers: {'Accept': 'application/json'}});
+                if (res.status === 401) { window.location.href = 'login.php'; return; }
+                const history = await res.json();
+                renderHistory(history);
+            } catch (err) {
+                console.error(err);
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div style="font-size:40px; margin-bottom:10px;">📶</div>
+                        <div>Could not load history. Please check your connection.</div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderHistory(history) {
+            const container = document.getElementById('tab-history');
+            if (!history || history.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div style="font-size:40px; margin-bottom:10px;">📋</div>
+                        <div>No trip history found.</div>
+                    </div>
+                `;
+                return;
+            }
+            let html = '';
+            history.forEach(row => {
+                const statusLabel = row.status === 'selesai' ? 'Completed' : 'Cancelled';
+                const stars = row.rating
+                    ? `<div style="color:#f59e0b; font-size:18px; margin-top:8px;">${'★'.repeat(row.rating)}${'☆'.repeat(5 - row.rating)}</div>`
+                    : '';
+                const fare = (row.status === 'selesai' && row.tambang)
+                    ? `<div style="font-size:13px; color:#16a34a; font-weight:700; margin-top:6px;">💰 RM ${escapeHTML(row.tambang)}</div>`
+                    : '';
+                html += `
+                    <div class="job-card">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <div class="card-ref" style="margin:0;">Booking Reference: ${escapeHTML(row.booking_ref)}</div>
+                            <span class="badge status-${row.status}">${statusLabel}</span>
+                        </div>
+                        <div class="card-customer">${escapeHTML(row.nama)}</div>
+                        <div class="route-grid">
+                            <div class="route-point">
+                                <span class="route-label">Pickup</span>
+                                <span class="route-value">${escapeHTML(row.pickup)}</span>
+                            </div>
+                            <div class="route-arrow">➔</div>
+                            <div class="route-point">
+                                <span class="route-label">Dropoff</span>
+                                <span class="route-value">${escapeHTML(row.dropoff)}</span>
+                            </div>
+                        </div>
+                        <div class="card-datetime" style="margin-bottom:0;">
+                            <span>Date: ${escapeHTML(row.tarikh_format)}</span>
+                            <span>Time: ${escapeHTML(row.masa_format)}</span>
+                        </div>
+                        ${fare}${stars}
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
         }
 
 
@@ -763,6 +843,7 @@ Please rearrange or cancel your booking. I sincerely apologise for the inconveni
         }
 
         async function claimJob(bookingId) {
+            setTripActionInFlight(true);
             try {
                 const res = await fetch('api/claim_job.php', {
                     method: 'POST',
@@ -771,7 +852,6 @@ Please rearrange or cancel your booking. I sincerely apologise for the inconveni
                 });
                 const data = await res.json();
                 if (data.success) {
-                    if (data.tg_url) fetch(data.tg_url, {mode: 'no-cors'}).catch(() => {});
                     showToast(data.message);
                     loadJobs();
                     loadMyTrips();
@@ -780,9 +860,11 @@ Please rearrange or cancel your booking. I sincerely apologise for the inconveni
                     loadJobs();
                 }
             } catch (err) { console.error(err); }
+            finally { setTripActionInFlight(false); }
         }
 
         async function updateStatus(bookingId, newStatus, tambang = null, caraBayaran = null) {
+            setTripActionInFlight(true);
             try {
                 const payload = {booking_id: bookingId, new_status: newStatus};
                 if (newStatus === 'selesai' && tambang !== null) {
@@ -796,7 +878,6 @@ Please rearrange or cancel your booking. I sincerely apologise for the inconveni
                 });
                 const data = await res.json();
                 if (data.success) {
-                    if (data.tg_url) fetch(data.tg_url, {mode: 'no-cors'}).catch(() => {});
                     showToast('Trip status updated successfully.');
                     if (newStatus === 'selesai') {
                         setTimeout(() => window.location.reload(), 1500);
@@ -807,6 +888,7 @@ Please rearrange or cancel your booking. I sincerely apologise for the inconveni
                     alert(data.message);
                 }
             } catch (err) { console.error(err); }
+            finally { setTripActionInFlight(false); }
         }
 
         async function toggleOnlineStatus(isOnline) {
@@ -863,6 +945,7 @@ Please rearrange or cancel your booking. I sincerely apologise for the inconveni
                 return; // Driver backed out
             }
             
+            setTripActionInFlight(true);
             try {
                 const res = await fetch('api/cancel_job.php', {
                     method: 'POST',
@@ -872,7 +955,6 @@ Please rearrange or cancel your booking. I sincerely apologise for the inconveni
                 const data = await res.json();
                 
                 if (data.success) {
-                    if (data.tg_url) fetch(data.tg_url, {mode: 'no-cors'}).catch(() => {});
                     showToast(data.message);
                     // Refresh both tabs to show the job moved from 'My Trips' back to 'Open Jobs'
                     loadJobs();
@@ -883,12 +965,15 @@ Please rearrange or cancel your booking. I sincerely apologise for the inconveni
             } catch (err) { 
                 console.error(err); 
                 alert("Connection error while activating antigravity sequence.");
+            } finally {
+                setTripActionInFlight(false);
             }
         }
 
         // ===== Init =====
         loadJobs();
         loadMyTrips();
+        loadHistory();
 
         // ===== Smart Polling (visibility-aware, pauses when offline/tab hidden) =====
         let pollingTimer = null;
@@ -898,6 +983,7 @@ Please rearrange or cancel your booking. I sincerely apologise for the inconveni
             pollingTimer = setInterval(() => {
                 if (document.getElementById('tab-jobs').classList.contains('active')) loadJobs();
                 if (document.getElementById('tab-mytrips').classList.contains('active')) loadMyTrips();
+                if (document.getElementById('tab-history').classList.contains('active')) loadHistory();
             }, 10000); // every 10 seconds
         }
 
@@ -937,12 +1023,63 @@ Please rearrange or cancel your booking. I sincerely apologise for the inconveni
             document.getElementById('themeToggle').textContent = saved === 'dark' ? '☀️' : '🌙';
         })();
 
-        // ===== PWA Service Worker =====
+        // ===== PWA Service Worker + safe update handling =====
+        let tripActionInFlight = 0;
+        let pendingWorker = null;
+        let updateRefreshQueued = false;
+
+        function setTripActionInFlight(inFlight) {
+            tripActionInFlight += inFlight ? 1 : -1;
+            tripActionInFlight = Math.max(0, tripActionInFlight);
+            if (tripActionInFlight === 0 && pendingWorker) {
+                showUpdateBanner();
+            }
+        }
+
+        function showUpdateBanner() {
+            const banner = document.getElementById('updateBanner');
+            if (banner) banner.hidden = false;
+        }
+
+        function applyPendingUpdate() {
+            if (!pendingWorker || tripActionInFlight > 0) return;
+            updateRefreshQueued = true;
+            pendingWorker.postMessage({type: 'SKIP_WAITING'});
+        }
+
+        function watchWorker(worker) {
+            if (!worker) return;
+            worker.addEventListener('statechange', () => {
+                if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                    pendingWorker = worker;
+                    if (tripActionInFlight === 0) showUpdateBanner();
+                }
+            });
+        }
+
         if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (updateRefreshQueued) window.location.reload();
+            });
             navigator.serviceWorker.register('./sw.js', { scope: './' })
-                .then(reg => console.log('SW registered with scope:', reg.scope))
+                .then(reg => {
+                    watchWorker(reg.installing);
+                    reg.addEventListener('updatefound', () => watchWorker(reg.installing));
+                    if (reg.waiting && navigator.serviceWorker.controller) {
+                        pendingWorker = reg.waiting;
+                        if (tripActionInFlight === 0) showUpdateBanner();
+                    }
+                })
                 .catch(err => console.error('SW registration error:', err));
         }
+
+        document.getElementById('reloadUpdateBtn').addEventListener('click', () => {
+            if (tripActionInFlight > 0) {
+                showToast('Please wait for the current trip action to finish.');
+                return;
+            }
+            applyPendingUpdate();
+        });
 
         // ===== PWA Install Prompt =====
         let deferredPrompt;

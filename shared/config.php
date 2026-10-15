@@ -1,16 +1,24 @@
 <?php
 // =========================================================================
 // SHARED DATABASE CONFIG — UTMKL Ride
-// Digunakan oleh /admin/ dan /driver/
+// Explicit local/production configuration; production values come from environment variables.
 // =========================================================================
 date_default_timezone_set('Asia/Kuala_Lumpur');
 mysqli_report(MYSQLI_REPORT_OFF);
 
-define('DB_HOST', 'localhost');
-define('DB_USER', 'root');
-define('DB_PASS', '8080');
-define('DB_NAME', 'ride_booking');
-
+// Configure the environment explicitly on the server; never trust HTTP_HOST.
+$app_env = getenv('APP_ENV') ?: 'local';
+if ($app_env === 'production') {
+    define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
+    define('DB_USER', getenv('DB_USER') ?: '');
+    define('DB_PASS', getenv('DB_PASS') ?: '');
+    define('DB_NAME', getenv('DB_NAME') ?: '');
+} else {
+    define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
+    define('DB_USER', getenv('DB_USER') ?: 'root');
+    define('DB_PASS', getenv('DB_PASS') ?: '8080');
+    define('DB_NAME', getenv('DB_NAME') ?: 'ride_booking');
+}
 // =========================================================================
 // HELPER: Sambungan DB dengan error handling standard
 // =========================================================================
@@ -158,10 +166,8 @@ $conn->query("
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
 
-// Nilai default untuk settings
+// Non-secret defaults only. Telegram credentials must be configured securely.
 $conn->query("INSERT IGNORE INTO settings (key_name, value) VALUES
-    ('telegram_bot_token',      '8601874885:AAGzZSB5Fs6HiRkcdDCDkxRBomApBNOAKcs'),
-    ('telegram_chat_id_admin',  '1359073968'),
     ('telegram_chat_id_drivers','')
 ");
 
@@ -205,5 +211,57 @@ if ($cols) {
     if (!in_array('cara_bayaran', $existing)) {
         $conn->query("ALTER TABLE tempahan ADD COLUMN cara_bayaran ENUM('tunai','qr') DEFAULT NULL");
     }
+}
+
+// =========================================================================
+// HELPER: Send Telegram notifications server-side without exposing bot URLs
+// =========================================================================
+function send_telegram_message(string $token, string $chat_id, string $message): bool {
+    if ($token === '' || $chat_id === '' || !function_exists('curl_init')) return false;
+    $ch = curl_init('https://api.telegram.org/bot' . rawurlencode($token) . '/sendMessage');
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query(['chat_id' => $chat_id, 'text' => $message, 'parse_mode' => 'Markdown']),
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_TIMEOUT => 5,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+    ]);
+    $response = curl_exec($ch);
+    $http_code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return $response !== false && $http_code >= 200 && $http_code < 300;
+}
+
+// =========================================================================
+// HELPER: Log admin action to audit trail
+// Usage: log_admin_action($conn, 'confirm', 'UTM-0012', 'Booking confirmed')
+// =========================================================================
+function log_admin_action(mysqli $conn, string $action, ?string $booking_ref = null, ?string $detail = null): void {
+    // Ensure table exists
+    $conn->query("
+        CREATE TABLE IF NOT EXISTS admin_logs (
+            id          INT AUTO_INCREMENT PRIMARY KEY,
+            admin_user  VARCHAR(100) NOT NULL DEFAULT 'admin',
+            action      VARCHAR(50)  NOT NULL,
+            booking_ref VARCHAR(20)  DEFAULT NULL,
+            detail      TEXT         DEFAULT NULL,
+            ip_address  VARCHAR(45)  DEFAULT NULL,
+            created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ");
+
+    $admin_user = $_SESSION['admin_username'] ?? 'admin';
+    $ip         = $_SERVER['REMOTE_ADDR'] ?? null;
+
+    $stmt = $conn->prepare("
+        INSERT INTO admin_logs (admin_user, action, booking_ref, detail, ip_address)
+        VALUES (?, ?, ?, ?, ?)
+    ");
+    if (!$stmt) return;
+    $stmt->bind_param('sssss', $admin_user, $action, $booking_ref, $detail, $ip);
+    $stmt->execute();
+    $stmt->close();
 }
 ?>

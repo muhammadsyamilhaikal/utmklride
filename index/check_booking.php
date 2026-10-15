@@ -1,7 +1,7 @@
 <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
+// ini_set('display_errors', 1);
+// ini_set('display_startup_errors', 1);
+// error_reporting(E_ALL);
 
 require_once 'config.php';
 
@@ -30,6 +30,14 @@ function getBookingStatus($status) {
                 'icon'  => '🟢',
                 'title' => 'BOOKING CONFIRMED',
                 'text'  => 'Your ride has been confirmed by the driver.'
+            ];
+
+        case 'in_progress':
+            return [
+                'class' => 'confirmed',
+                'icon'  => '🚗',
+                'title' => 'RIDE IN PROGRESS',
+                'text'  => 'Your driver is on the way! The ride is currently in progress.'
             ];
 
         case 'selesai':
@@ -64,13 +72,19 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['submit_rating'])) {
     $r_booking = intval($_POST['booking_id']);
     $r_rating = intval($_POST['rating']);
     
+    // Bounds check
+    if ($r_rating < 1 || $r_rating > 5) {
+        $r_rating = 0; // Guard will catch this and prevent write
+    }
+    
     $check_col = $conn->query("SHOW COLUMNS FROM tempahan LIKE 'rating'");
     if ($check_col && $check_col->num_rows == 0) {
         $conn->query("ALTER TABLE tempahan ADD COLUMN rating INT DEFAULT NULL");
     }
     
-    $stmt = $conn->prepare("UPDATE tempahan SET rating = ? WHERE id = ?");
-    if($stmt) {
+    // Guard: only allow rating if not already submitted (prevents overwrite via manipulated POST)
+    $stmt = $conn->prepare("UPDATE tempahan SET rating = ? WHERE id = ? AND (rating IS NULL OR rating = 0)");
+    if($stmt && $r_rating > 0) {
         $stmt->bind_param("ii", $r_rating, $r_booking);
         $stmt->execute();
         $stmt->close();
@@ -141,6 +155,9 @@ if ($booking && !array_key_exists('driver_nama', $booking)) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#146EF5">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="../driver/icons/icon-192.png">
     <title>Check Booking Status - UTMKL RIDE</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -359,7 +376,7 @@ if ($booking && !array_key_exists('driver_nama', $booking)) {
                                     <h3>Rate your driver</h3>
                                     <p style="font-size:12px; color:#68739a; margin-bottom:15px;">How was your ride with <?= htmlspecialchars($driver_nama); ?>?</p>
                                     <form method="POST">
-                                        <input type="hidden" name="booking_id" value="<?= $booking_id; ?>">
+                                        <input type="hidden" name="booking_id" value="<?= (int)$booking['id']; ?>">
                                         <input type="hidden" name="phone" value="<?= htmlspecialchars($phone_input); ?>">
                                         <input type="hidden" name="submit_rating" value="1">
                                         
@@ -388,6 +405,156 @@ if ($booking && !array_key_exists('driver_nama', $booking)) {
                             <?php endif; ?>
                         </div>
 
+                        <?php
+                        // Show reminder button only for confirmed/in_progress bookings with future ride time
+                        $ride_datetime_str = $booking['tarikh'] . ' ' . $booking['masa'];
+                        $ride_timestamp_ms = strtotime($ride_datetime_str) * 1000;
+                        $reminder_ms       = $ride_timestamp_ms - (30 * 60 * 1000); // 30 min before
+                        $now_ms            = time() * 1000;
+                        $show_reminder     = in_array($booking_status, ['confirmed', 'in_progress'], true) && $reminder_ms > $now_ms;
+                        ?>
+                        <?php if ($show_reminder): ?>
+                        <div id="reminderSection" style="margin-top:14px;">
+                            <button
+                                id="btnReminder"
+                                type="button"
+                                onclick="toggleReminder()"
+                                style="width:100%;min-height:44px;border:1.5px solid #dbe2ef;border-radius:9px;
+                                       background:#fff;color:#1556e8;font:inherit;font-size:13px;font-weight:600;
+                                       cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;
+                                       transition:.2s ease;"
+                            >
+                                🔔 Set Ride Reminder (30 min before)
+                            </button>
+                            <p id="reminderNote" style="margin-top:8px;font-size:10px;color:#8c98b8;text-align:center;line-height:1.5;"></p>
+                        </div>
+
+                        <script>
+                        (function() {
+                            const BOOKING_REF   = <?= json_encode($formatted_id); ?>;
+                            const RIDE_TS       = <?= (int)($ride_timestamp_ms / 1000); ?>; // Unix seconds
+                            const REMINDER_TS   = RIDE_TS - (30 * 60);                       // 30 min before
+                            const PASSENGER     = <?= json_encode(htmlspecialchars($booking['nama'], ENT_QUOTES)); ?>;
+                            const PICKUP        = <?= json_encode(htmlspecialchars($booking['pickup'], ENT_QUOTES)); ?>;
+                            const STORAGE_KEY   = 'reminder_' + BOOKING_REF;
+
+                            const btn           = document.getElementById('btnReminder');
+                            const note          = document.getElementById('reminderNote');
+
+                            // Format ride time for display
+                            const rideDate = new Date(RIDE_TS * 1000);
+                            const timeStr  = rideDate.toLocaleTimeString('en-MY', {hour:'2-digit', minute:'2-digit'});
+                            const dateStr  = rideDate.toLocaleDateString('en-MY', {day:'2-digit', month:'short', year:'numeric'});
+
+                            function setActiveState() {
+                                btn.style.background      = '#eef5ff';
+                                btn.style.borderColor     = '#93c5fd';
+                                btn.style.color           = '#1556e8';
+                                btn.innerHTML = '✅ Reminder Set — ' + dateStr + ' at ' + timeStr;
+                                note.textContent = 'You will get a browser notification 30 minutes before your ride. Keep this tab open or revisit this page.';
+                            }
+
+                            function setIdleState() {
+                                btn.style.background      = '#fff';
+                                btn.style.borderColor     = '#dbe2ef';
+                                btn.style.color           = '#1556e8';
+                                btn.innerHTML = '🔔 Set Ride Reminder (30 min before)';
+                                note.textContent = '';
+                            }
+
+                            function scheduleNotification() {
+                                const msUntilReminder = (REMINDER_TS - Math.floor(Date.now() / 1000)) * 1000;
+                                if (msUntilReminder <= 0) {
+                                    note.textContent = '⏰ Ride is less than 30 minutes away — reminder too late to set!';
+                                    return;
+                                }
+
+                                // Store in localStorage so reminder survives page reload
+                                localStorage.setItem(STORAGE_KEY, String(REMINDER_TS));
+
+                                setTimeout(async function() {
+                                    if (localStorage.getItem(STORAGE_KEY) !== String(REMINDER_TS)) return; // cancelled
+                                    await fireRideNotification();
+                                }, msUntilReminder);
+
+                                setActiveState();
+                            }
+
+                            // Uses SW registration.showNotification() when available —
+                            // this fires even when the tab is in the background (but browser must be open).
+                            // Falls back to plain Notification API.
+                            async function fireRideNotification() {
+                                const title = '🚗 UTMKL Ride — Heads Up!';
+                                const options = {
+                                    body: 'Hi ' + PASSENGER + '! Your ride from ' + PICKUP + ' is in 30 minutes.\nBooking: ' + BOOKING_REF,
+                                    icon: '../driver/icons/icon-192.png',
+                                    tag:  BOOKING_REF,
+                                    requireInteraction: true
+                                };
+                                if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                                    try {
+                                        const reg = await navigator.serviceWorker.ready;
+                                        await reg.showNotification(title, options);
+                                        return;
+                                    } catch (e) { /* fall through */ }
+                                }
+                                new Notification(title, options);
+                            }
+
+                            async function toggleReminder() {
+                                // Already set — cancel it
+                                if (localStorage.getItem(STORAGE_KEY)) {
+                                    localStorage.removeItem(STORAGE_KEY);
+                                    setIdleState();
+                                    note.textContent = 'Reminder cancelled.';
+                                    return;
+                                }
+
+                                if (!('Notification' in window)) {
+                                    note.textContent = '⚠️ Your browser does not support notifications.';
+                                    return;
+                                }
+
+                                if (Notification.permission === 'granted') {
+                                    scheduleNotification();
+                                } else if (Notification.permission !== 'denied') {
+                                    const perm = await Notification.requestPermission();
+                                    if (perm === 'granted') {
+                                        scheduleNotification();
+                                    } else {
+                                        note.textContent = '⚠️ Notification permission denied. Please enable it in your browser settings.';
+                                    }
+                                } else {
+                                    note.textContent = '⚠️ Notifications are blocked. Please allow them in your browser settings and try again.';
+                                }
+                            }
+
+                            // On load: restore reminder state if already set
+                            if (localStorage.getItem(STORAGE_KEY)) {
+                                const savedTs = parseInt(localStorage.getItem(STORAGE_KEY), 10);
+                                if (savedTs === REMINDER_TS && REMINDER_TS > Math.floor(Date.now() / 1000)) {
+                                    setActiveState();
+                                    // Re-schedule if permission still granted (e.g. page refreshed)
+                                    if (Notification.permission === 'granted') {
+                                        const ms = (REMINDER_TS - Math.floor(Date.now() / 1000)) * 1000;
+                                        if (ms > 0) {
+                                            setTimeout(async function() {
+                                                if (localStorage.getItem(STORAGE_KEY) !== String(REMINDER_TS)) return;
+                                                await fireRideNotification();
+                                            }, ms);
+                                        }
+                                    }
+                                } else {
+                                    localStorage.removeItem(STORAGE_KEY); // expired, clean up
+                                }
+                            }
+
+                            // Expose for button onclick
+                            window.toggleReminder = toggleReminder;
+                        })();
+                        </script>
+                        <?php endif; ?>
+
                         <?php if ($pdf_allowed): ?>
                             <div id="pdf-receipt" style="margin-top:22px;border:1px solid #e7eaf2;border-radius:10px;overflow:hidden;">
                                 <div class="pdf-header">
@@ -397,7 +564,7 @@ if ($booking && !array_key_exists('driver_nama', $booking)) {
 
                                 <div class="pdf-body">
                                     <div class="pdf-status">
-                                        <?= $booking_status === 'selesai' ? '✅ RIDE COMPLETED' : '✔ BOOKING CONFIRMED'; ?>
+                                        <?= $booking_status === 'selesai' ? '✅ RIDE COMPLETED' : ($booking_status === 'in_progress' ? '🚗 RIDE IN PROGRESS' : '✔ BOOKING CONFIRMED'); ?>
                                     </div>
 
                                     <table class="pdf-table">
@@ -439,7 +606,7 @@ if ($booking && !array_key_exists('driver_nama', $booking)) {
                                             <?php endif; ?>
                                              <?php if ($driver_telefon): ?>
                                              <?php
-                                                 $wa_number = clean_phone_my($driver_telefon);
+                                                 $wa_number = normalizePhone($driver_telefon);
                                                  $wa_msg = urlencode("Hi, I am a UTMKL Ride passenger. My booking ref: {$formatted_id}.");
                                              ?>
                                              <p style="margin-top:10px;">
@@ -509,6 +676,13 @@ if ($booking && !array_key_exists('driver_nama', $booking)) {
         <a href="./" class="back-home">← Back to UTMKL Ride</a>
     </main>
 </div>
+<script>
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js', { scope: './' })
+        .then(reg => console.log('Customer SW registered:', reg.scope))
+        .catch(err => console.error('Customer SW error:', err));
+}
+</script>
 </body>
 </html>
 

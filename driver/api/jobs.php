@@ -54,4 +54,5 @@ while ($row = $result->fetch_assoc()) {
     ];
 }
 
+if (isset($stmt)) $stmt->close();
 echo json_encode($jobs);

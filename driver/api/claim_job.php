@@ -33,19 +33,21 @@ $stmt->bind_param("ii", $driver_id, $booking_id);
 $stmt->execute();
 
 if ($stmt->affected_rows === 1) {
-    $driver_nama = $_SESSION['driver_nama'];
+    $driver_nama = $_SESSION['driver_nama'] ?? 'Unknown Driver';
     $booking_ref = "UTM-" . str_pad($booking_id, 4, '0', STR_PAD_LEFT);
 
     $tg_token   = get_setting($conn, 'telegram_bot_token');
     $tg_chat_id = get_setting($conn, 'telegram_chat_id_admin');
-    $tg_url     = "";
 
     if ($tg_token && $tg_chat_id) {
         $msg    = "🚗 *TRIP CLAIMED*\nBooking $booking_ref has been claimed by driver *$driver_nama*.";
-        $tg_url = "https://api.telegram.org/bot{$tg_token}/sendMessage?chat_id={$tg_chat_id}&parse_mode=Markdown&text=" . urlencode($msg);
+        send_telegram_message($tg_token, $tg_chat_id, $msg);
     }
 
-    echo json_encode(["success" => true, "message" => "Trip claimed successfully!", "tg_url" => $tg_url]);
+    echo json_encode(["success" => true, "message" => "Trip claimed successfully!"]);
 } else {
     echo json_encode(["success" => false, "message" => "This trip has already been taken by another driver."]);
 }
+
+if (isset($check_driver)) $check_driver->close();
+if (isset($stmt)) $stmt->close();

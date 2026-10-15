@@ -1,4 +1,4 @@
-const CACHE_NAME = 'utmkl-driver-v3';
+const CACHE_NAME = 'utmkl-driver-v4';
 const STATIC_ASSETS = [
   './dashboard.php',
   './login.php',
@@ -20,8 +20,14 @@ self.addEventListener('install', event => {
       return Promise.allSettled(
         STATIC_ASSETS.map(asset => cache.add(asset).catch(err => console.warn(`Failed to cache ${asset}:`, err)))
       );
-    }).then(() => self.skipWaiting())
+    })
   );
+});
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', event => {

@@ -19,20 +19,19 @@ $stmt->bind_param("ii", $booking_id, $driver_id);
 $stmt->execute();
 
 if ($stmt->affected_rows === 1) {
-    $driver_nama = $_SESSION['driver_nama'];
+    $driver_nama = $_SESSION['driver_nama'] ?? 'Unknown Driver';
     $booking_ref = "UTM-" . str_pad($booking_id, 4, '0', STR_PAD_LEFT);
     
     // Telegram Notification to Admin
     $tg_token   = get_setting($conn, 'telegram_bot_token');
     $tg_chat_id = get_setting($conn, 'telegram_chat_id_admin');
-    $tg_url     = "";
 
     if ($tg_token && $tg_chat_id) {
         $msg    = "⚠️ *JOB RELEASED (ANTIGRAVITY)*\nBooking $booking_ref has been cancelled by driver *$driver_nama* and is floating back in the open pool.";
-        $tg_url = "https://api.telegram.org/bot{$tg_token}/sendMessage?chat_id={$tg_chat_id}&parse_mode=Markdown&text=" . urlencode($msg);
+        send_telegram_message($tg_token, $tg_chat_id, $msg);
     }
 
-    echo json_encode(["success" => true, "message" => "Order cancelled. Antigravity engaged!", "tg_url" => $tg_url]);
+    echo json_encode(["success" => true, "message" => "Order cancelled. Antigravity engaged!"]);
 } else {
     echo json_encode(["success" => false, "message" => "Failed to cancel. The trip might already be completed or reassigned."]);
 }
